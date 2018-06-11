@@ -9,8 +9,8 @@
     <version>1.0-SNAPSHOT</version>
 
     <properties>
-        <finagle.version>6.41.0</finagle.version>
-        <finagle.core.version>6.41.0</finagle.core.version>
+        <finagle.version>18.5.0</finagle.version>
+        <finagle.core.version>18.5.0</finagle.core.version>
         <netty4.version>4.1.25.Final</netty4.version>
         <tcnative.version>2.0.8.Final</tcnative.version>
     </properties>

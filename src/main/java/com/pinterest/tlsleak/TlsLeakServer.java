@@ -9,7 +9,15 @@ import com.twitter.finagle.http.Request;
 import com.twitter.finagle.http.Response;
 import com.twitter.finagle.http.Status;
 import com.twitter.finagle.server.StackBasedServer;
+import com.twitter.finagle.ssl.ApplicationProtocolsConfig;
+import com.twitter.finagle.ssl.CipherSuitesConfig;
+import com.twitter.finagle.ssl.ClientAuthConfig;
 import com.twitter.finagle.ssl.Engine;
+import com.twitter.finagle.ssl.KeyCredentialsConfig;
+import com.twitter.finagle.ssl.ProtocolsConfig;
+import com.twitter.finagle.ssl.TrustCredentialsConfig;
+import com.twitter.finagle.ssl.server.SslServerConfiguration;
+import com.twitter.finagle.ssl.server.SslServerEngineFactory;
 import com.twitter.finagle.transport.Transport;
 import com.twitter.util.Future;
 import com.twitter.util.Futures;
@@ -40,6 +48,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.KeyManagerFactory;
@@ -49,6 +58,7 @@ import javax.net.ssl.TrustManagerFactory;
 public class TlsLeakServer {
 
   private final static int PORT = 9192;
+  private final static String[] ENABLED_PROTOCOLS = {"TLSv1.2"};
 
   public static void main(String[] args) {
 
@@ -66,7 +76,7 @@ public class TlsLeakServer {
         @Override
         public Future<Response> apply(Request request) {
           Response response = Response.apply(Status.Ok());
-          response.setContent(ChannelBuffers.wrappedBuffer("debuggingtheleak".getBytes()));
+          response.setContentString("debuggingtheleak");
           Future<Response> future = Future.value(response);
           return future;
         }
@@ -84,22 +94,18 @@ public class TlsLeakServer {
               .get()
               .bindTo(new InetSocketAddress(InetAddress.getLoopbackAddress(), PORT))
               .name("TlsLeakServer")
-              .stack((StackBasedServer<Request, Response>) Http
+              .stack(Http
                   .server()
-                  .configured(new Transport.TLSServerEngine(Option.<Function0<Engine>>apply(
-                      new AbstractFunction0<Engine>() {
-                        @Override
-                        public Engine apply() {
-                          SSLEngine sslEngine =
-                              sslServerContext.newEngine(UnpooledByteBufAllocator.DEFAULT);
-                          return new Engine(sslEngine, false, "generic");
-                        }
-                      }
-                  )).mk())));
-
-      while (true) {
-          Thread.sleep(1000);
-      }
+                  .configured(new Transport.ServerSsl(Option.<SslServerConfiguration>apply(
+                      new SslServerConfiguration(
+                          KeyCredentialsConfig.UNSPECIFIED,
+                          ClientAuthConfig.NEEDED, TrustCredentialsConfig.UNSPECIFIED,
+                          CipherSuitesConfig.UNSPECIFIED,
+                          ProtocolsConfig.enabled(Arrays.asList(ENABLED_PROTOCOLS)),
+                          ApplicationProtocolsConfig.UNSPECIFIED)
+                  )).mk())
+                  .configured(new SslServerEngineFactory.Param(
+                      new tlsServerEngineFactory(keystore, truststore, password)).mk())));
 
     } catch (Exception e) {
       System.out.println("Exception!");
@@ -108,6 +114,28 @@ public class TlsLeakServer {
       System.exit(1);
     }
   }
+
+  public static class tlsServerEngineFactory extends SslServerEngineFactory {
+
+    SslContext sslContext;
+
+    public tlsServerEngineFactory(String keystore, String truststore, char[] password)
+        throws Exception {
+      sslContext = SslContextBuilder
+          .forServer(newKeyManagerFactory(keystore, password))
+          .trustManager(newTrustManagerFactory(truststore, password))
+          .sslProvider(SslProvider.OPENSSL)
+          .clientAuth(ClientAuth.REQUIRE)
+          .build();
+    }
+
+    @Override
+    public Engine apply(SslServerConfiguration sslServerConfiguration) {
+      SSLEngine engine = sslContext.newEngine(UnpooledByteBufAllocator.DEFAULT);
+      return new Engine(engine, false, "generic");
+    }
+  }
+
 
   private static KeyManagerFactory newKeyManagerFactory(String keystorePath, char[] password)
       throws KeyStoreException, IOException, CertificateException, NoSuchAlgorithmException,

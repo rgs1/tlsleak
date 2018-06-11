@@ -1,40 +1,35 @@
 package com.pinterest.tlsleak;
 
+import com.twitter.finagle.Address;
 import com.twitter.finagle.Http;
 import com.twitter.finagle.Service;
 import com.twitter.finagle.builder.ClientBuilder;
-import com.twitter.finagle.builder.ServerBuilder;
-import com.twitter.finagle.client.StackBasedClient;
 import com.twitter.finagle.http.Methods;
 import com.twitter.finagle.http.Request;
 import com.twitter.finagle.http.Response;
-import com.twitter.finagle.server.StackBasedServer;
+import com.twitter.finagle.ssl.ApplicationProtocolsConfig;
+import com.twitter.finagle.ssl.CipherSuitesConfig;
 import com.twitter.finagle.ssl.Engine;
+import com.twitter.finagle.ssl.KeyCredentialsConfig;
+import com.twitter.finagle.ssl.ProtocolsConfig;
+import com.twitter.finagle.ssl.TrustCredentialsConfig;
+import com.twitter.finagle.ssl.client.SslClientConfiguration;
+import com.twitter.finagle.ssl.client.SslClientEngineFactory;
 import com.twitter.finagle.transport.Transport;
 import com.twitter.util.Await;
 import com.twitter.util.Future;
 import com.twitter.util.Futures;
 import io.netty.buffer.UnpooledByteBufAllocator;
-import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslProvider;
-import org.jboss.netty.handler.codec.http.HttpResponseStatus;
-import scala.Function0;
-import scala.Function1;
 import scala.Option;
-import scala.Unit;
-import scala.collection.JavaConversions;
-import scala.collection.JavaConverters;
 import scala.runtime.AbstractFunction0;
 import scala.runtime.AbstractFunction1;
 import scala.runtime.BoxedUnit;
 
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -63,33 +58,25 @@ public class TlsLeakClient {
     char[] password = args[2].toCharArray();
 
     try {
-      final SslContext sslClientContext = SslContextBuilder
-          .forClient()
-          .keyManager(newKeyManagerFactory(keystore, password))
-          .trustManager(newTrustManagerFactory(truststore, password))
-          .sslProvider(SslProvider.OPENSSL)
-          .build();
-
       final ClientBuilder builder =
           ClientBuilder
               .get()
               .hosts("localhost:" + PORT)
               .hostConnectionLimit(1)
-              .stack((StackBasedClient<Request, Response>) Http
+              .stack(Http
                   .client()
-                  .configured(new Transport.TLSClientEngine(
-                      Option.<Function1<SocketAddress, Engine>>apply(
-                          new AbstractFunction1<SocketAddress, Engine>() {
-                            @Override
-                            public Engine apply(SocketAddress server) {
-                              SSLEngine sslEngine =
-                                  sslClientContext.newEngine(UnpooledByteBufAllocator.DEFAULT);
-                              return new Engine(sslEngine, false, "generic");
-                            }
-                          }
-                      )).mk()));
+                  .configured(new Transport.ClientSsl(Option.<SslClientConfiguration>apply(
+                      new SslClientConfiguration(
+                          Option.<String>empty(),
+                          KeyCredentialsConfig.UNSPECIFIED,
+                          TrustCredentialsConfig.UNSPECIFIED,
+                          CipherSuitesConfig.UNSPECIFIED,
+                          ProtocolsConfig.UNSPECIFIED,
+                          ApplicationProtocolsConfig.UNSPECIFIED))).mk())
+                  .configured(new SslClientEngineFactory.Param(
+                      new tlsClientEngineFactory(keystore, truststore, password)).mk()));
 
-      final AtomicInteger counter =  new AtomicInteger(20000);
+      final AtomicInteger counter =  new AtomicInteger(1000000);
 
       List<Future<BoxedUnit>> runners = new ArrayList<>();
       for (int i=0; i <= 16; i++) {
@@ -122,6 +109,27 @@ public class TlsLeakClient {
       System.out.println(e.getClass().getName());
       System.out.println(e.getMessage());
       System.exit(1);
+    }
+  }
+
+  public static class tlsClientEngineFactory extends SslClientEngineFactory {
+
+    SslContext sslContext;
+
+    public tlsClientEngineFactory(String keystore, String truststore, char[] password)
+        throws Exception {
+      sslContext = SslContextBuilder
+          .forClient()
+          .keyManager(newKeyManagerFactory(keystore, password))
+          .trustManager(newTrustManagerFactory(truststore, password))
+          .sslProvider(SslProvider.OPENSSL)
+          .build();
+    }
+
+    @Override
+    public Engine apply(Address address, SslClientConfiguration sslClientConfiguration) {
+      SSLEngine engine = sslContext.newEngine(UnpooledByteBufAllocator.DEFAULT);
+      return new Engine(engine, false, "generic");
     }
   }
 
