@@ -15,4 +15,4 @@ exec java -server -Xmx${HEAP_SIZE} -Xms${HEAP_SIZE} -XX:NewSize=${NEW_SIZE} -XX:
 -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.ssl=false \
 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.port=10103 \
 -Dfile.encoding=UTF-8 \
-${JAVA_MAIN}
+${JAVA_MAIN} $@
